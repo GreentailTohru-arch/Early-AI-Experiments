@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Immersive Hand-Controlled Particle System + Skeleton View</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        /* 主3D画布 */
+        #main-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 0;
+        }
+        
+        /* --- UI Overlay --- */
+        #ui-container {
+            position: absolute;
+            top: 20px; left: 20px; width: 280px;
+            padding: 20px;
+            background: rgba(20, 20, 35, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff; user-select: none; z-index: 10;
+        }
+        h1 { font-size: 18px; margin: 0 0 15px 0; color: #00d2ff; text-transform: uppercase; letter-spacing: 1px; }
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; }
+        input[type="range"] {
+            width: 100%; -webkit-appearance: none; background: rgba(255,255,255,0.1); height: 4px; border-radius: 2px; outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px; background: #00d2ff; border-radius: 50%; cursor: pointer; transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        button {
+            flex: 1; padding: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: white; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s;
+        }
+        button:hover, button.active { background: #00d2ff; color: #000; border-color: #00d2ff; }
+        input[type="color"] { width: 100%; height: 30px; border: none; background: none; cursor: pointer; }
+
+        /* --- Drawing Canvas Overlay --- */
+        #draw-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 20; display: none; cursor: crosshair;
+        }
+        #draw-instruction { position: absolute; top: 20px; width: 100%; text-align: center; color: white; pointer-events: none; font-size: 20px; font-weight: bold; }
+        #draw-controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; }
+        #draw-controls button { padding: 10px 20px; font-size: 14px; min-width: 100px;}
+
+        /* --- Camera Skeleton View (Top Right) --- */
+        #camera-container {
+            position: absolute;
+            top: 20px; right: 20px;
+            width: 240px; /* 固定宽度 */
+            height: 180px; /* 固定高度 (4:3 比例) */
+            background: #000;
+            border: 2px solid rgba(0, 210, 255, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+            z-index: 15;
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
+        }
+        #output_canvas {
+            width: 100%; height: 100%;
+            /* 镜像翻转，让操作更自然 */
+            transform: scaleX(-1); 
+            display: block;
+        }
+
+        /* --- Status & Hidden Video --- */
+        #status {
+            position: absolute; bottom: 20px; right: 20px;
+            color: rgba(255,255,255,0.5); font-size: 12px; text-align: right; z-index: 5;
+        }
+        /* 原始视频元素保持隐藏，我们只用它来获取数据 */
+        #input_video { display: none; }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h1>粒子控制台</h1>
+        <div class="control-group">
+            <label>模型选择</label>
+            <div class="btn-group">
+                <button onclick="setShape('nebula')" class="active" id="btn-nebula">星云</button>
+                <button onclick="setShape('heart')" id="btn-heart">爱心</button>
+                <button onclick="toggleDrawMode()" id="btn-draw">✏️ 自定义绘制</button>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>粒子颜色</label>
+            <input type="color" id="colorPicker" value="#00d2ff">
+        </div>
+        <div class="control-group">
+            <label>最大扩散度 (手张开时)</label>
+            <input type="range" id="spreadSlider" min="1" max="8" step="0.1" value="3">
+        </div>
+        <div class="control-group">
+            <label>粒子密度 (需重置)</label>
+            <input type="range" id="densitySlider" min="2000" max="20000" step="1000" value="8000" onchange="resetParticles()">
+        </div>
+        <div style="font-size:11px; color:#aaa; margin-top:15px; line-height: 1.6;">
+            <strong>操作指南:</strong><br>
+            ✋ <b>张开/握拳:</b> 炸开或聚合粒子<br>
+            ↔️ <b>左右移动:</b> 旋转物体视角<br>
+            ↕️ <b>上下移动:</b> 倾斜物体视角
+        </div>
+    </div>
+
+    <div id="camera-container">
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div id="draw-overlay">
+        <div id="draw-instruction">请在屏幕上绘制图案...</div>
+        <canvas id="paint-canvas"></canvas>
+        <div id="draw-controls">
+            <button onclick="clearCanvas()">清空</button>
+            <button onclick="submitDrawing()" style="background:#00d2ff; color:black;">生成粒子</button>
+            <button onclick="toggleDrawMode()">取消</button>
+        </div>
+    </div>
+
+    <div id="status">系统初始化中...<br>等待摄像头权限</div>
+    <video id="input_video" playsinline></video>
+
+    <script>
+        // --- 1. Global Config & State ---
+        const config = {
+            particleCount: 8000,
+            particleSize: 0.15,
+            baseColor: new THREE.Color('#00d2ff'),
+            spreadFactor: 3.0,
+            handInteraction: 0, 
+            handDetected: false,
+            targetRotationX: 0, targetRotationY: 0,
+            currentShape: 'nebula',
+            canvasDrawingPoints: []
+        };
+
+        // --- 2. Three.js Init ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.02);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 15;
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.domElement.id = 'main-canvas'; // Add ID for CSS z-index
+        document.body.appendChild(renderer.domElement);
+
+        // --- 3. Particle Texture ---
+        function createParticleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, 32, 32);
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true; return texture;
+        }
+
+        // --- 4. Particle System Build ---
+        let particleSystem, particleGeometry, particleMaterial;
+        let positions, targetPositions, initialPositions;
+
+        function initParticles() {
+            if (particleSystem) scene.remove(particleSystem);
+            particleGeometry = new THREE.BufferGeometry();
+            positions = new Float32Array(config.particleCount * 3);
+            targetPositions = new Float32Array(config.particleCount * 3);
+            initialPositions = new Float32Array(config.particleCount * 3);
+            const colors = new Float32Array(config.particleCount * 3);
+            for (let i = 0; i < config.particleCount; i++) {
+                const x = (Math.random() - 0.5) * 30;
+                const y = (Math.random() - 0.5) * 30;
+                const z = (Math.random() - 0.5) * 30;
+                positions[i*3]=x; positions[i*3+1]=y; positions[i*3+2]=z;
+                colors[i*3]=1; colors[i*3+1]=1; colors[i*3+2]=1;
+            }
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            particleMaterial = new THREE.PointsMaterial({
+                size: config.particleSize, map: createParticleTexture(), transparent: true, opacity: 0.8,
+                vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, color: config.baseColor
+            });
+            particleSystem = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(particleSystem);
+            calculateTargetPositions(config.currentShape);
+        }
+
+        // Background Stars
+        function initBackground() {
+            const bgGeo = new THREE.BufferGeometry();
+            const bgCount = 3000;
+            const bgPos = new Float32Array(bgCount * 3);
+            for(let i=0; i<bgCount; i++) {
+                bgPos[i*3] = (Math.random() - 0.5) * 100;
+                bgPos[i*3+1] = (Math.random() - 0.5) * 100;
+                bgPos[i*3+2] = (Math.random() - 0.5) * 100 - 20; 
+            }
+            bgGeo.setAttribute('position', new THREE.BufferAttribute(bgPos, 3));
+            const bgMat = new THREE.PointsMaterial({ size: 0.1, color: 0x888888, transparent:true, opacity:0.5 });
+            const bgSystem = new THREE.Points(bgGeo, bgMat);
+            scene.add(bgSystem); return bgSystem;
+        }
+        const bgParticles = initBackground();
+
+        // --- 5. Shape Algorithms ---
+        function calculateTargetPositions(type) {
+            config.currentShape = type;
+            document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
+            if(type === 'nebula') document.getElementById('btn-nebula').classList.add('active');
+            if(type === 'heart') document.getElementById('btn-heart').classList.add('active');
+            if(type === 'custom') document.getElementById('btn-draw').classList.add('active');
+
+            for (let i = 0; i < config.particleCount; i++) {
+                let x, y, z;
+                if (type === 'nebula') {
+                    const r = 5 * Math.cbrt(Math.random());
+                    const theta = Math.random() * 2 * Math.PI;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    x = r * Math.sin(phi) * Math.cos(theta); y = r * Math.sin(phi) * Math.sin(theta) * 0.6; z = r * Math.cos(phi);
+                } 
+                else if (type === 'heart') {
+                    const t = Math.random() * Math.PI * 2;
+                    x = 16 * Math.pow(Math.sin(t), 3); y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+                    z = (Math.random() - 0.5) * 4; const scale = 0.35; x *= scale; y *= scale; z *= scale;
+                    const fill = Math.random(); x *= fill; y *= fill; z *= fill; y += 1; 
+                }
+                else if (type === 'custom') {
+                    if (config.canvasDrawingPoints.length > 0) {
+                        const p = config.canvasDrawingPoints[i % config.canvasDrawingPoints.length];
+                        x = p.x; y = p.y; z = p.z + (Math.random()-0.5)*2; 
+                    } else { x = (Math.random()-0.5)*10; y = (Math.random()-0.5)*10; z = 0; }
+                }
+                targetPositions[i*3]=x; targetPositions[i*3+1]=y; targetPositions[i*3+2]=z;
+                initialPositions[i*3]=x; initialPositions[i*3+1]=y; initialPositions[i*3+2]=z;
+            }
+        }
+
+        // --- 6. MediaPipe Hands Setup (Core Update) ---
+        const videoElement = document.getElementById('input_video');
+        // 获取右上角用于绘制骨骼的 Canvas 及其上下文
+        const outputCanvas = document.getElementById('output_canvas');
+        const canvasCtx = outputCanvas.getContext('2d');
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onHandsResults);
+
+        // 设置 CameraUtils 时指定分辨率，确保绘图 Canvas 比例正确
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        cameraUtils.start();
+        
+        // 确保 Canvas 内部分辨率与视频源一致，防止变形
+        videoElement.onloadedmetadata = () => {
+            outputCanvas.width = videoElement.videoWidth;
+            outputCanvas.height = videoElement.videoHeight;
+        };
+
+
+        function onHandsResults(results) {
+            const statusDiv = document.getElementById('status');
+            
+            // --- A. 绘制骨骼视图 (新功能) ---
+            canvasCtx.save();
+            // 1. 清除画布
+            canvasCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            // 2. 绘制当前摄像头视频帧作为背景
+            canvasCtx.drawImage(results.image, 0, 0, outputCanvas.width, outputCanvas.height);
+            
+            // 3. 如果检测到手，绘制骨骼和关键点
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    // 绘制连接线 (骨骼) - 使用青色
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
+                                   {color: '#00d2ff', lineWidth: 3});
+                    // 绘制关键点 (关节) - 使用白色
+                    drawLandmarks(canvasCtx, landmarks,
+                                  {color: '#ffffff', lineWidth: 1, radius: 4, fillColor: '#00d2ff'});
+                }
+            }
+            canvasCtx.restore();
+            // ------------------------------------
+
+            // --- B. 粒子交互逻辑 (保持不变) ---
+            if (results.multiHandLandmarks.length > 0) {
+                config.handDetected = true;
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // 扩散控制 (拇指-食指距离)
+                const p1 = landmarks[4]; 
+                const p2 = landmarks[8]; 
+                const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+                let interaction = (distance - 0.05) * 4; 
+                interaction = Math.max(0, Math.min(1, interaction));
+                config.handInteraction = THREE.MathUtils.lerp(config.handInteraction, interaction, 0.1);
+
+                // 旋转控制 (手掌中心位置)
+                const handCenter = landmarks[9];
+                const rotRange = 2.5; 
+                const targetY = (handCenter.x - 0.5) * rotRange * 2; 
+                const targetX = (handCenter.y - 0.5) * rotRange;
+                config.targetRotationY = targetY;
+                config.targetRotationX = targetX;
+
+                statusDiv.innerHTML = "🔴 手势追踪中<br>扩散: " + (interaction > 0.5 ? "开" : "合");
+                statusDiv.style.color = "#00d2ff";
+
+            } else {
+                config.handDetected = false;
+                config.handInteraction = THREE.MathUtils.lerp(config.handInteraction, 0, 0.05);
+                statusDiv.innerHTML = "⚪ 等待手势...<br>(进入自动旋转模式)";
+                statusDiv.style.color = "rgba(255,255,255,0.5)";
+            }
+        }
+
+        // --- 7. Animation Loop ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            const positionsArray = particleGeometry.attributes.position.array;
+
+            // Particle Dynamics
+            for (let i = 0; i < config.particleCount; i++) {
+                const px = i*3; const py = i*3+1; const pz = i*3+2;
+                let tx = targetPositions[px]; let ty = targetPositions[py]; let tz = targetPositions[pz];
+                const spread = 1 + (config.handInteraction * config.spreadFactor); 
+                const vibration = config.handInteraction * 0.2 * (Math.random() - 0.5);
+                tx = tx * spread + vibration; ty = ty * spread + vibration; tz = tz * spread + vibration;
+                tx += Math.sin(time * 0.5 + py) * 0.2; ty += Math.cos(time * 0.3 + px) * 0.2;
+                positionsArray[px] += (tx - positionsArray[px]) * 0.08;
+                positionsArray[py] += (ty - positionsArray[py]) * 0.08;
+                positionsArray[pz] += (tz - positionsArray[pz]) * 0.08;
+            }
+            particleGeometry.attributes.position.needsUpdate = true;
+            
+            // Rotation Logic
+            if (config.handDetected) {
+                particleSystem.rotation.y += (config.targetRotationY - particleSystem.rotation.y) * 0.08;
+                particleSystem.rotation.x += (config.targetRotationX - particleSystem.rotation.x) * 0.08;
+            } else {
+                particleSystem.rotation.y += 0.003; 
+                particleSystem.rotation.x += (0 - particleSystem.rotation.x) * 0.05;
+            }
+            bgParticles.rotation.y = time * 0.01;
+            renderer.render(scene, camera);
+        }
+
+        // --- 8. UI Events ---
+        window.setShape = function(type) { calculateTargetPositions(type); };
+        document.getElementById('colorPicker').addEventListener('input', (e) => {
+            config.baseColor.set(e.target.value); particleMaterial.color = config.baseColor;
+        });
+        document.getElementById('spreadSlider').addEventListener('input', (e) => { config.spreadFactor = parseFloat(e.target.value); });
+        window.resetParticles = function() { config.particleCount = parseInt(document.getElementById('densitySlider').value); initParticles(); };
+
+        // --- 9. Custom Drawing Logic ---
+        const drawOverlay = document.getElementById('draw-overlay');
+        const paintCanvas = document.getElementById('paint-canvas');
+        const pCtx = paintCanvas.getContext('2d');
+        let isDrawing = false;
+        function resizePaintCanvas() { paintCanvas.width = window.innerWidth; paintCanvas.height = window.innerHeight; }
+        window.toggleDrawMode = function() {
+            if (drawOverlay.style.display === 'block') { drawOverlay.style.display = 'none'; } 
+            else { resizePaintCanvas(); drawOverlay.style.display = 'block'; pCtx.clearRect(0,0, paintCanvas.width, paintCanvas.height);
+                pCtx.strokeStyle = '#333'; pCtx.lineWidth = 2; pCtx.beginPath();
+                pCtx.moveTo(paintCanvas.width/2, 0); pCtx.lineTo(paintCanvas.width/2, paintCanvas.height);
+                pCtx.moveTo(0, paintCanvas.height/2); pCtx.lineTo(paintCanvas.width, paintCanvas.height/2); pCtx.stroke(); }
+        };
+        paintCanvas.addEventListener('mousedown', startDraw); paintCanvas.addEventListener('mousemove', draw); paintCanvas.addEventListener('mouseup', endDraw);
+        function startDraw(e) { isDrawing = true; draw(e); } function endDraw() { isDrawing = false; pCtx.beginPath(); }
+        function draw(e) { if (!isDrawing) return; pCtx.lineWidth = 20; pCtx.lineCap = 'round'; pCtx.strokeStyle = '#fff'; pCtx.lineTo(e.clientX, e.clientY); pCtx.stroke(); pCtx.beginPath(); pCtx.moveTo(e.clientX, e.clientY); }
+        window.clearCanvas = function() { pCtx.clearRect(0,0, paintCanvas.width, paintCanvas.height); };
+        window.submitDrawing = function() {
+            const imgData = pCtx.getImageData(0, 0, paintCanvas.width, paintCanvas.height); const data = imgData.data; const points = []; const step = 8; 
+            for (let y = 0; y < paintCanvas.height; y += step) { for (let x = 0; x < paintCanvas.width; x += step) {
+                    const index = (y * paintCanvas.width + x) * 4; if (data[index+3] > 0) {
+                        const worldX = (x / paintCanvas.width - 0.5) * 30; const worldY = -(y / paintCanvas.height - 0.5) * 20; points.push({x: worldX, y: worldY, z: 0}); }}}
+            if (points.length === 0) { alert("请先绘制！"); return; } config.canvasDrawingPoints = points; toggleDrawMode(); setShape('custom');
+        };
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+            if(drawOverlay.style.display === 'block') resizePaintCanvas();
+        });
+
+        initParticles();
+        animate();
+    </script>
+</body>
+</html>
