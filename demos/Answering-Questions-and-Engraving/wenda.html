@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>武氏祠趣味历史问答 - 数字化研学</title>
+    <style>
+        :root {
+            --gold: #d4af37;
+            --stone: #1a1a1a;
+            --accent: #8b0000;
+            --glass: rgba(20, 20, 20, 0.85);
+        }
+
+        body { margin: 0; overflow: hidden; background: #000; font-family: "LXGW WenKai", "Microsoft YaHei", serif; }
+        canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+
+        /* 全屏装饰边框 */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 20px; left: 20px; right: 20px; bottom: 20px;
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #ui-wrapper {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            pointer-events: none;
+        }
+
+        #quiz-card {
+            width: 90%;
+            max-width: 550px;
+            padding: 50px;
+            background: var(--glass);
+            backdrop-filter: blur(25px);
+            border: 1px solid rgba(212, 175, 55, 0.5);
+            position: relative;
+            pointer-events: auto;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            clip-path: polygon(0 5%, 5% 0, 95% 0, 100% 5%, 100% 95%, 95% 100%, 5% 100%, 0 95%);
+        }
+
+        .corner {
+            position: absolute;
+            width: 30px; height: 30px;
+            border: 2px solid var(--gold);
+        }
+        .lt { top: 15px; left: 15px; border-right: none; border-bottom: none; }
+        .rb { bottom: 15px; right: 15px; border-left: none; border-top: none; }
+
+        h1 { 
+            font-size: 2rem; 
+            margin: 0 0 20px 0; 
+            color: var(--gold); 
+            letter-spacing: 8px;
+            text-shadow: 0 0 15px rgba(212, 175, 55, 0.3);
+        }
+
+        .subtitle {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 30px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .question { 
+            font-size: 1.25rem; 
+            line-height: 1.6;
+            min-height: 80px; 
+            margin: 20px 0; 
+            color: #fff; 
+            font-weight: 300;
+        }
+
+        .options-grid { display: grid; gap: 18px; }
+
+        .option-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            padding: 18px 25px;
+            color: #b0b0b0;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+            font-size: 1rem;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .option-btn:hover {
+            background: rgba(212, 175, 55, 0.15);
+            color: var(--gold);
+            border-color: var(--gold);
+            transform: translateX(10px);
+        }
+
+        #progress-bar {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 3px;
+            background: rgba(255,255,255,0.05);
+        }
+        #progress-inner {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--gold));
+            width: 0%;
+            transition: width 0.8s ease;
+        }
+
+        .shake { animation: shake 0.4s ease-in-out; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-wrapper">
+    <div id="quiz-card">
+        <div id="progress-bar"><div id="progress-inner"></div></div>
+        <div class="corner lt"></div>
+        <div class="corner rb"></div>
+        
+        <div class="subtitle">Virtual Exhibition Hall</div>
+        <h1 id="title">武氏祠趣味历史问答</h1>
+        
+        <div class="question" id="q-text">正在唤醒千年石刻...</div>
+        <div class="options-grid" id="options-box"></div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+    /** --- 音频合成引擎 --- **/
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    function playFeedbackSound(isCorrect) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        if (isCorrect) {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        } else {
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+            oscillator.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.4);
+        }
+    }
+
+    function playVictorySound() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 和弦
+        notes.forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.1);
+            gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.1);
+            gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + i * 0.1 + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.1 + 1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(audioCtx.currentTime + i * 0.1);
+            osc.stop(audioCtx.currentTime + i * 0.1 + 1);
+        });
+    }
+
+    /** --- 3D 增强引擎 --- **/
+    let scene, camera, renderer, wall, pointLight, particles;
+    let leftJarGroup, rightJarGroup; 
+    let knowledgeLabels = []; 
+    let mouseX = 0, mouseY = 0;
+
+    const facts = [
+        "汉画像石：绣像的汉代史", "武梁：汉代著名刻石人物", "减地平雕：凸显轮廓的雕法",
+        "祠堂：祭祀先祖的建筑", "二十四孝：中国传统孝道艺术", "祥瑞：龙凤朱雀的象征",
+        "石质图书馆：记录汉代社会", "阴线刻：线条流畅的细节处理", "东汉晚期：武氏祠修建年代",
+        "山东嘉祥：武氏祠所在地", "神话世界：伏羲女娲与西王母", "历史故事：荆轲刺秦王",
+        "乐舞百戏：汉代娱乐生活缩影", "车马出行图：汉代威仪象征", "石阙：祠堂建筑的礼制标尺",
+        "儒家教化：画像石的核心思想", "西王母：汉代长生不老的渴望", "曾子避席：经典孝道故事",
+        "闵子骞说亲：汉代道德模范", "管仲背书：古代贤臣轶事", "如鸟斯革：汉代屋顶的艺术感",
+        "石雕艺术：从地宫到祠堂的演变", "嘉祥石雕：国家级非物质文化遗产", "汉代服饰：画像石中的衣裳冠冕",
+        "建筑史料：汉代土木结构的影子", "宇宙观：天圆地方的汉代想象", "灵魂升天：汉代丧葬信仰的体现",
+        "艺术瑰宝：世界石刻艺术的奇迹", "数字文博：让石刻在虚空中复活", "研学千年：感悟汉文化的厚重"
+    ];
+
+    function init3D() {
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.08);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, 512, 512);
+        for(let i=0; i<5000; i++) {
+            ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.03})`;
+            ctx.fillRect(Math.random()*512, Math.random()*512, 1, 1);
+        }
+        const stoneTex = new THREE.CanvasTexture(canvas);
+        const geometry = new THREE.PlaneGeometry(22, 14);
+        const material = new THREE.MeshStandardMaterial({ map: stoneTex, color: 0x333333, roughness: 0.9 });
+        wall = new THREE.Mesh(geometry, material);
+        wall.position.z = -2;
+        scene.add(wall);
+
+        function createArtifact() {
+            const group = new THREE.Group();
+            const jarPoints = [];
+            jarPoints.push(new THREE.Vector2(0, -0.6), new THREE.Vector2(0.4, -0.6), new THREE.Vector2(0.8, -0.2), 
+                           new THREE.Vector2(0.75, 0.3), new THREE.Vector2(0.4, 0.5), new THREE.Vector2(0.5, 0.6));
+            const jarGeo = new THREE.LatheGeometry(jarPoints, 16);
+            const jarMat = new THREE.MeshStandardMaterial({ color: 0x1a0f0d, metalness: 0.6, roughness: 0.5 });
+            group.add(new THREE.Mesh(jarGeo, jarMat));
+
+            const wireGeo = new THREE.WireframeGeometry(jarGeo);
+            const lineMat = new THREE.LineBasicMaterial({ color: 0xd4af37, transparent: true, opacity: 0.4 });
+            const lineFrame = new THREE.LineSegments(wireGeo, lineMat);
+            lineFrame.scale.setScalar(1.03);
+            group.add(lineFrame);
+
+            const nodes = new THREE.Points(jarGeo, new THREE.PointsMaterial({ color: 0xd4af37, size: 0.04 }));
+            nodes.scale.setScalar(1.03);
+            group.add(nodes);
+            return group;
+        }
+
+        leftJarGroup = createArtifact(); leftJarGroup.position.set(-4.5, 0, 1.5); scene.add(leftJarGroup);
+        rightJarGroup = createArtifact(); rightJarGroup.position.set(4.5, 0, 1.5); scene.add(rightJarGroup);
+
+        const pGeometry = new THREE.BufferGeometry();
+        const pCount = 3000; 
+        const coords = new Float32Array(pCount * 3);
+        for(let i=0; i<pCount; i++) {
+            coords[i*3] = (Math.random() - 0.5) * 35;
+            coords[i*3+1] = (Math.random() - 0.5) * 35;
+            coords[i*3+2] = (Math.random() - 0.5) * 30;
+        }
+        pGeometry.setAttribute('position', new THREE.BufferAttribute(coords, 3));
+        particles = new THREE.Points(pGeometry, new THREE.PointsMaterial({ size: 0.03, color: 0xffffff, transparent: true, opacity: 0.6 }));
+        scene.add(particles);
+
+        facts.forEach((text, i) => {
+            const labelCanvas = document.createElement('canvas');
+            labelCanvas.width = 400; labelCanvas.height = 80;
+            const lctx = labelCanvas.getContext('2d');
+            lctx.fillStyle = 'rgba(212, 175, 55, 0.28)'; 
+            lctx.fillRect(0, 0, 400, 80);
+            lctx.strokeStyle = 'rgba(212, 175, 55, 0.7)';
+            lctx.lineWidth = 4;
+            lctx.strokeRect(2, 2, 396, 76);
+            lctx.fillStyle = '#ffffff';
+            lctx.font = 'bold 20px "KaiTi", "STKaiti", "楷体", serif';
+            lctx.textAlign = 'center';
+            lctx.fillText(text, 200, 50);
+
+            const tex = new THREE.CanvasTexture(labelCanvas);
+            const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0 });
+            const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.24), labelMat);
+            labelMesh.position.set((Math.random()-0.5)*20, (Math.random()-0.5)*14, (Math.random()-0.5)*10);
+            labelMesh.userData = { speed: 0.002 + Math.random()*0.007, phase: Math.random()*Math.PI*2, rotSpeed: (Math.random()-0.5) * 0.003 };
+            knowledgeLabels.push(labelMesh);
+            scene.add(labelMesh);
+        });
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.1));
+        pointLight = new THREE.PointLight(0xd4af37, 2, 25);
+        pointLight.position.set(0, 0, 4);
+        scene.add(pointLight);
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = (e.clientX - window.innerWidth/2) / 200;
+            mouseY = (e.clientY - window.innerHeight/2) / 200;
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const time = Date.now() * 0.001;
+        camera.position.x += (mouseX - camera.position.x) * 0.05;
+        camera.position.y += (-mouseY - camera.position.y) * 0.05;
+        camera.lookAt(0, 0, 0);
+
+        [leftJarGroup, rightJarGroup].forEach((g, i) => g.rotation.y += (i === 0 ? 0.008 : -0.008));
+
+        knowledgeLabels.forEach(label => {
+            label.position.y += label.userData.speed;
+            label.position.x += Math.sin(time + label.userData.phase) * 0.004;
+            label.rotation.z += label.userData.rotSpeed;
+            if(label.position.y > 7) label.position.y = -7;
+            const verticalDist = Math.abs(label.position.y);
+            label.material.opacity = Math.max(0, 0.7 - verticalDist/10);
+        });
+        renderer.render(scene, camera);
+    }
+
+    const questions = [
+        { q: "武氏祠石刻主要采用哪种雕刻手法？", a: ["圆雕", "减地平雕加阴线刻", "透雕", "镂空刻"], c: 1 },
+        { q: "祠内著名的‘伏羲女娲’像中，两人身体呈现什么状态？", a: ["并肩站立", "蛇躯交缠", "背对背坐", "御龙飞行"], c: 1 },
+        { q: "武氏祠石刻被学术界誉为？", a: ["汉代历史百科全书", "东方维纳斯", "石刻清明上河图", "汉代版敦煌壁画"], c: 0 },
+        { q: "‘武梁’在汉代担任的官职最有可能是？", a: ["大将军", "从事", "州牧", "丞相"], c: 1 },
+        { q: "这些石刻最初被放置在祠堂的什么位置？", a: ["地宫深处", "祭祀室的墙壁", "祠堂大门外", "屋顶脊饰"], c: 1 }
+    ];
+
+    let current = 0, score = 0;
+
+    function renderQuiz() {
+        const qText = document.getElementById('q-text');
+        const optBox = document.getElementById('options-box');
+        const progress = document.getElementById('progress-inner');
+        if(current >= questions.length) { finish(); return; }
+        const q = questions[current];
+        qText.style.opacity = 0;
+        setTimeout(() => {
+            qText.innerText = q.q; qText.style.opacity = 1;
+            optBox.innerHTML = '';
+            progress.style.width = `${(current / questions.length) * 100}%`;
+            q.a.forEach((txt, i) => {
+                const b = document.createElement('button');
+                b.className = 'option-btn';
+                b.innerHTML = `<span style="color:var(--gold); margin-right:15px">0${i+1}</span> ${txt}`;
+                b.onclick = () => handleAnswer(i);
+                optBox.appendChild(b);
+            });
+        }, 300);
+    }
+
+    function handleAnswer(idx) {
+        const isCorrect = (idx === questions[current].c);
+        playFeedbackSound(isCorrect);
+        if(isCorrect) {
+            score++; pointLight.color.setHex(0x00ff88); pointLight.intensity = 5;
+        } else {
+            document.getElementById('quiz-card').classList.add('shake');
+            pointLight.color.setHex(0xff3300); pointLight.intensity = 5;
+            setTimeout(() => document.getElementById('quiz-card').classList.remove('shake'), 400);
+        }
+        setTimeout(() => {
+            pointLight.color.setHex(0xd4af37); pointLight.intensity = 2;
+            current++; renderQuiz();
+        }, 700);
+    }
+
+    function finish() {
+        playVictorySound(); // 触发通关音效
+        document.getElementById('progress-inner').style.width = '100%';
+        document.getElementById('quiz-card').innerHTML = `<div class="corner lt"></div><div class="corner rb"></div>
+            <h1 style="color:var(--gold)">研学圆满</h1>
+            <div style="font-size:3rem; color:#fff; margin:20px 0;">${(score/questions.length)*100}<span style="font-size:1rem">分</span></div>
+            <p style="color:#aaa; line-height:1.8">你在武氏祠的数字化探索中表现优异。</p>
+            <div style="margin-top:30px"><button class="option-btn" style="width:100%; text-align:center" onclick="location.reload()">再次挑战</button></div>
+            <div style="margin-top:30px"><button class="option-btn" style="width:100%; text-align:center" onclick="location.href='kezi.html'">石魂刻字体验</button></div>`;
+    }
+
+    window.onload = () => { init3D(); animate(); setTimeout(renderQuiz, 1000); };
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+</script>
+
+</body>
+</html>
