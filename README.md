@@ -8,6 +8,8 @@
 | Geometric Warfare | 2026-05-22 | [Sequel][warfare2]&nbsp;\|&nbsp;[Original][warfare1] |
 | Point Cloud VFX Lab | 2026-05-22 | [Lab][point-cloud] |
 
+The archive homepage and original demos are in [`website/`](website/).
+
 [alpha]: https://greentailtohru-arch.github.io/Early-AI-Experiments/demos/Alpha/index.html
 [quiz]: https://greentailtohru-arch.github.io/Early-AI-Experiments/demos/Answering-Questions-and-Engraving/wenda.html
 [engraving]: https://greentailtohru-arch.github.io/Early-AI-Experiments/demos/Answering-Questions-and-Engraving/kezi.html
