@@ -16,10 +16,15 @@ main {
 }
 
 h1 {
-  margin: 0 0 1.25rem;
+  margin: 0 0 .4rem;
   font-size: clamp(1.5rem, 5vw, 2rem);
   font-weight: 600;
   letter-spacing: -.03em;
+}
+
+.date-note {
+  margin: 0 0 1rem;
+  font-size: .8rem;
 }
 
 ul {
@@ -28,8 +33,20 @@ ul {
   list-style: none;
 }
 
+li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: .75rem;
+}
+
+time {
+  font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+}
+
 a {
-  display: inline-block;
+  justify-self: start;
   padding-block: .45rem;
   color: inherit;
   text-decoration: none;
