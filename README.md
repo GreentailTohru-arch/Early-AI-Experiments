@@ -5,8 +5,8 @@
 | Alpha | 2025-12-02 | [Alpha][alpha] |
 | Wu Shrine | 2026-04-26 | [Quiz][quiz]&nbsp;\|&nbsp;[Engraving][engraving] |
 | Relic Display | 2026-05-01 | [3.0][relic3]&nbsp;\|&nbsp;[2.0][relic2] |
-| Geometric Warfare | 2026-05-22 | [Sequel][warfare2]&nbsp;\|&nbsp;[Original][warfare1] |
-| Point Cloud VFX Lab | 2026-05-22 | [Lab][point-cloud] |
+| Geometric Warfare | 2026-05-15 | [Sequel][warfare2]&nbsp;\|&nbsp;[Original][warfare1] |
+| Point Cloud VFX Lab | 2026-05-21 | [Lab][point-cloud] |
 
 The archive homepage and original demos are in [`website/`](website/).
 
